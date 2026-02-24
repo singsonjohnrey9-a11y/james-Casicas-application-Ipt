@@ -1,7 +1,5 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
-import { createRoot } from 'react-dom/client';
-import { categoryIconMap, Package } from './Icons';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || '';
 
@@ -15,24 +13,126 @@ const MAP_STYLES = [
     { id: 'outdoors', label: '3D Terrain', style: 'mapbox://styles/mapbox/outdoors-v12' },
 ];
 
-function renderIconToString(IconComponent, color = '#fff', size = 16) {
-    const container = document.createElement('div');
-    const root = createRoot(container);
-    root.render(<IconComponent size={size} color={color} strokeWidth={2} />);
-    const svg = container.innerHTML;
-    root.unmount();
-    return svg;
-}
-
-const MARKER_SIZE = 14;
-
 export default function MapView({ listings = [], onMarkerClick, radiusKm, centerCoords }) {
     const mapContainer = useRef(null);
     const mapRef = useRef(null);
-    const markersRef = useRef([]);
-    const popupsRef = useRef([]);
+    const popupRef = useRef(null);
+    const listingsRef = useRef(listings);
     const [activeStyle, setActiveStyle] = useState('light');
     const [showStyles, setShowStyles] = useState(false);
+
+    listingsRef.current = listings;
+
+    // Build GeoJSON from listings
+    const buildGeoJSON = useCallback((data) => ({
+        type: 'FeatureCollection',
+        features: data.map((l) => ({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [l.longitude, l.latitude] },
+            properties: {
+                id: l.id,
+                title: l.title,
+                price: Number(l.price).toLocaleString(),
+                category: l.category_display || l.category,
+                listing_type: l.listing_type,
+                label: l.title.length > 18 ? l.title.slice(0, 16) + '…' : l.title,
+                image_url: l.image || l.image_url || '',
+                isSell: l.listing_type === 'sell' ? 1 : 0,
+            },
+        })),
+    }), []);
+
+    // Add marker layers to map
+    const addMarkerLayers = useCallback((map) => {
+        if (map.getSource('listings')) return;
+
+        map.addSource('listings', {
+            type: 'geojson',
+            data: buildGeoJSON(listingsRef.current),
+        });
+
+        // Circle dots (sell = black, buy = white with border)
+        map.addLayer({
+            id: 'listing-dots',
+            type: 'circle',
+            source: 'listings',
+            paint: {
+                'circle-radius': 7,
+                'circle-color': ['case', ['==', ['get', 'isSell'], 1], '#0a0a0a', '#ffffff'],
+                'circle-stroke-width': 2,
+                'circle-stroke-color': '#0a0a0a',
+                'circle-opacity': 1,
+            },
+        });
+
+        // Text labels above dots
+        map.addLayer({
+            id: 'listing-labels',
+            type: 'symbol',
+            source: 'listings',
+            layout: {
+                'text-field': ['get', 'label'],
+                'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+                'text-size': 10,
+                'text-offset': [0, -1.5],
+                'text-anchor': 'bottom',
+                'text-max-width': 10,
+                'text-allow-overlap': false,
+                'text-ignore-placement': false,
+            },
+            paint: {
+                'text-color': '#333',
+                'text-halo-color': 'rgba(255,255,255,0.9)',
+                'text-halo-width': 1.5,
+            },
+        });
+
+        // Hover popup
+        const popup = new mapboxgl.Popup({
+            closeButton: false,
+            closeOnClick: false,
+            maxWidth: '200px',
+            className: 'map-hover-popup',
+            offset: [0, -14],
+        });
+        popupRef.current = popup;
+
+        map.on('mouseenter', 'listing-dots', (e) => {
+            map.getCanvas().style.cursor = 'pointer';
+            const f = e.features[0];
+            const props = f.properties;
+            const coords = f.geometry.coordinates.slice();
+            const isSell = props.isSell === 1;
+
+            const imgSrc = props.image_url;
+            const imgHTML = imgSrc
+                ? `<img src="${imgSrc}" alt="" style="width:100%;height:110px;object-fit:cover;display:block;" />`
+                : `<div style="width:100%;height:60px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;color:#ccc;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                   </div>`;
+
+            popup.setLngLat(coords).setHTML(`
+                ${imgHTML}
+                <div style="padding:8px;">
+                  <div style="font-weight:700;font-size:12px;line-height:1.3;margin-bottom:3px;">${props.title}</div>
+                  <div style="font-weight:800;font-size:15px;margin-bottom:4px;">₱${props.price}</div>
+                  <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.1em;color:#999;">${props.category} · ${isSell ? 'Sale' : 'Buy'}</div>
+                  <div style="margin-top:6px;font-size:10px;font-weight:600;color:#0a0a0a;text-transform:uppercase;letter-spacing:0.06em;">View Details →</div>
+                </div>
+            `).addTo(map);
+        });
+
+        map.on('mouseleave', 'listing-dots', () => {
+            map.getCanvas().style.cursor = '';
+            popup.remove();
+        });
+
+        map.on('click', 'listing-dots', (e) => {
+            const props = e.features[0].properties;
+            const listing = listingsRef.current.find((l) => l.id === props.id);
+            if (listing && onMarkerClick) onMarkerClick(listing);
+        });
+    }, [buildGeoJSON, onMarkerClick]);
 
     // Initialize map
     useEffect(() => {
@@ -56,6 +156,11 @@ export default function MapView({ listings = [], onMarkerClick, radiusKm, center
             'top-right'
         );
 
+        map.on('load', () => {
+            addMarkerLayers(map);
+            updateRadiusCircle();
+        });
+
         mapRef.current = map;
         return () => map.remove();
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -68,8 +173,8 @@ export default function MapView({ listings = [], onMarkerClick, radiusKm, center
         const styleObj = MAP_STYLES.find((s) => s.id === activeStyle);
         if (styleObj) {
             map.setStyle(styleObj.style);
-            // Re-add radius circle + enable terrain after style loads
             map.once('style.load', () => {
+                addMarkerLayers(map);
                 updateRadiusCircle();
                 if (activeStyle === 'outdoors') {
                     map.addSource('mapbox-dem', {
@@ -84,6 +189,25 @@ export default function MapView({ listings = [], onMarkerClick, radiusKm, center
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [activeStyle]);
+
+    // Update listings data
+    useEffect(() => {
+        const map = mapRef.current;
+        if (!map) return;
+
+        const updateSource = () => {
+            const source = map.getSource('listings');
+            if (source) {
+                source.setData(buildGeoJSON(listings));
+            }
+        };
+
+        if (map.isStyleLoaded()) {
+            updateSource();
+        } else {
+            map.once('style.load', updateSource);
+        }
+    }, [listings, buildGeoJSON]);
 
     // Draw radius circle
     const updateRadiusCircle = useCallback(() => {
@@ -134,121 +258,10 @@ export default function MapView({ listings = [], onMarkerClick, radiusKm, center
         else map.on('load', updateRadiusCircle);
     }, [updateRadiusCircle]);
 
-    // Update markers
-    useEffect(() => {
-        const map = mapRef.current;
-        if (!map) return;
-
-        // Clear old
-        markersRef.current.forEach((m) => m.remove());
-        markersRef.current = [];
-        popupsRef.current.forEach((p) => p.remove());
-        popupsRef.current = [];
-
-        listings.forEach((listing) => {
-            const isSell = listing.listing_type === 'sell';
-
-            // Truncate title for label (max 20 chars)
-            const labelText = listing.title.length > 20 ? listing.title.slice(0, 18) + '…' : listing.title;
-
-            // Wrapper sized to dot with overflow:visible for label
-            const el = document.createElement('div');
-            el.style.cssText = `
-                width: ${MARKER_SIZE}px;
-                height: ${MARKER_SIZE}px;
-                position: relative;
-                overflow: visible;
-                cursor: pointer;
-            `;
-
-            // Label above dot
-            const label = document.createElement('div');
-            label.textContent = labelText;
-            label.style.cssText = `
-                position: absolute;
-                bottom: ${MARKER_SIZE + 2}px;
-                left: 50%;
-                transform: translateX(-50%);
-                white-space: nowrap;
-                font-size: 9px;
-                font-weight: 600;
-                font-family: 'Inter', sans-serif;
-                color: #333;
-                background: rgba(255,255,255,0.92);
-                padding: 1px 5px;
-                border-radius: 3px;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-                pointer-events: none;
-                max-width: 100px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-            `;
-            el.appendChild(label);
-
-            // Dot
-            const dot = document.createElement('div');
-            dot.style.cssText = `
-                width: ${MARKER_SIZE}px;
-                height: ${MARKER_SIZE}px;
-                background: ${isSell ? '#0a0a0a' : '#ffffff'};
-                border: 2px solid #0a0a0a;
-                border-radius: 50%;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-            `;
-            el.appendChild(dot);
-
-            // Popup
-            const imgSrc = listing.image || listing.image_url;
-            const imgHTML = imgSrc
-                ? `<img src="${imgSrc}" alt="" style="width:100%;height:110px;object-fit:cover;display:block;" />`
-                : `<div style="width:100%;height:70px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;color:#ccc;">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                   </div>`;
-
-            const popup = new mapboxgl.Popup({
-                offset: [0, -(MARKER_SIZE / 2 + 4)],
-                closeButton: false,
-                closeOnClick: false,
-                maxWidth: '200px',
-                className: 'map-hover-popup',
-            }).setHTML(`
-                ${imgHTML}
-                <div style="padding:8px;">
-                  <div style="font-weight:700;font-size:12px;line-height:1.3;margin-bottom:3px;">${listing.title}</div>
-                  <div style="font-weight:800;font-size:15px;margin-bottom:4px;">₱${Number(listing.price).toLocaleString()}</div>
-                  <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.1em;color:#999;">${listing.category_display || listing.category} · ${isSell ? 'Sale' : 'Buy'}</div>
-                  <div style="margin-top:6px;font-size:10px;font-weight:600;color:#0a0a0a;text-transform:uppercase;letter-spacing:0.06em;">View Details →</div>
-                </div>
-            `);
-
-            popupsRef.current.push(popup);
-
-            el.addEventListener('mouseenter', () => {
-                dot.style.boxShadow = '0 2px 12px rgba(0,0,0,0.5)';
-                popup.setLngLat([listing.longitude, listing.latitude]).addTo(map);
-            });
-            el.addEventListener('mouseleave', () => {
-                dot.style.boxShadow = '0 1px 4px rgba(0,0,0,0.3)';
-                popup.remove();
-            });
-
-            const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
-                .setLngLat([listing.longitude, listing.latitude])
-                .addTo(map);
-
-            el.addEventListener('click', () => {
-                if (onMarkerClick) onMarkerClick(listing);
-            });
-
-            markersRef.current.push(marker);
-        });
-    }, [listings, onMarkerClick]);
-
     return (
         <div style={{ width: '100%', height: '100%', position: 'relative' }}>
             <div ref={mapContainer} style={{ width: '100%', height: '100%' }} />
 
-            {/* Map Style Switcher */}
             <div className="map-style-switcher">
                 <button
                     className="map-style-toggle"
