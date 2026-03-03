@@ -15,9 +15,20 @@ export default function Navbar() {
         return () => window.removeEventListener('scroll', handleScroll);
     }, []);
 
+    // Close menu on route change
     useEffect(() => {
         setMenuOpen(false);
     }, [location]);
+
+    // Lock body scroll when menu is open
+    useEffect(() => {
+        if (menuOpen) {
+            document.body.style.overflow = 'hidden';
+        } else {
+            document.body.style.overflow = '';
+        }
+        return () => { document.body.style.overflow = ''; };
+    }, [menuOpen]);
 
     const navClass = `navbar ${isLanding ? 'dark' : ''} ${scrolled ? 'scrolled' : ''}`;
 
@@ -26,7 +37,7 @@ export default function Navbar() {
             <Link to="/" className="navbar-brand">CaSiCaS</Link>
 
             <button
-                className="navbar-toggle"
+                className={`navbar-toggle ${menuOpen ? 'active' : ''}`}
                 onClick={() => setMenuOpen(!menuOpen)}
                 aria-label="Toggle menu"
             >
