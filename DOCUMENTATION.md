@@ -1,6 +1,6 @@
 # CaSiCaS Application — System Documentation
 
-> **Version:** 1.0  
+> **Version:** 2.0  
 > **Date:** March 2026  
 > **Status:** Production  
 > **Repository:** [CaSiCas-Application-IPT](https://github.com/jamesgwapo123-coder/CaSiCas-Application-IPT)
@@ -259,11 +259,12 @@ graph TD
 
 | Feature | Description |
 |---|---|
-| **Sign Up** | Register with username, email, password, and role (Buyer/Seller) |
-| **Sign In** | Login with username or email + password |
+| **Sign Up** | Two-column register page: left = form (role picker, name, username, email, password), right = branding panel with motivational quote |
+| **Sign In** | Clean login form with SVG icon-prefixed inputs (User, Lock) and show/hide password toggle |
 | **Session Persistence** | JWT tokens stored in browser; auto-refreshed by Supabase SDK |
 | **Auth State Listener** | `onAuthStateChange` hooks detect login/logout across tabs |
-| **Profile Management** | User profile stored in `profiles` table with username, role, bio, phone, coordinates |
+| **Profile Management** | User profile stored in `profiles` table with username, role, bio, phone, avatar, ratings, and transaction stats |
+| **Icon-Based UI** | All auth forms use custom SVG icons (14+ icons in `Icons.jsx`) instead of text labels or emojis |
 
 ### 7.2 Marketplace (Map-Based Browsing)
 
@@ -278,6 +279,7 @@ graph TD
 | **Radius Slider** | 0–50 km radius slider with visual circle overlay on map |
 | **Map Style Switcher** | 5 styles: Streets, Light, Dark, Satellite, 3D Terrain |
 | **Geolocation** | Browser GPS integration for "locate me" functionality |
+| **Responsive Layout** | Map stacks above listings panel on mobile (40vh/60vh split) |
 
 ### 7.3 Listing Management (CRUD)
 
@@ -293,22 +295,34 @@ graph TD
 
 | Feature | Description |
 |---|---|
-| **Conversation List** | View all conversations with other user name, listing context, last message preview, and unread count |
+| **Conversation List** | View all conversations with avatar initials, listing context, last message preview, and unread count |
 | **Auto-Create Conversation** | Clicking "Chat" on a listing auto-creates a buyer–seller conversation |
 | **Real-Time Messages** | Messages sync instantly via Supabase Realtime (PostgreSQL CDC) |
 | **Image Sharing** | Attach and send images within chat (uploaded to `chat-images` bucket) |
 | **Emoji Reactions** | React to messages with ❤️ 👍 😂 😮 😢 — toggle on/off |
 | **Read Receipts** | Unread message count displayed per conversation |
+| **SVG Icon Controls** | Send, attach, back, close, and reaction buttons all use SVG icons |
 | **Keyboard Shortcuts** | Press Enter to send, Shift+Enter for newline |
 
 ### 7.5 Dashboard
 
 | Feature | Description |
 |---|---|
-| **My Listings Tab** | View all listings created by the current user |
-| **Messages Tab** | View all conversations and open chat panel |
-| **Profile Tab** | View account details: username, name, email, role, member since |
+| **My Listings Tab** | View all listings created by the current user with edit/delete actions |
+| **Messages Tab** | View all conversations with avatar circles and open chat panel |
+| **Profile Tab** | Avatar with upload overlay, stats row (total sales, purchases, star rating), account details with icons, inline edit form for phone/bio |
+| **Avatar Upload** | Profile picture upload to Supabase `avatars` storage bucket; initials fallback if no photo |
+| **Star Rating** | 5-star rating display with filled/empty stars, average score, and review count |
 | **Quick Actions** | Edit or delete listings directly from dashboard cards |
+
+### 7.6 User Ratings
+
+| Feature | Description |
+|---|---|
+| **Buyer Rates Seller** | After a purchase, buyers can rate sellers (1–5 stars) with an optional text review |
+| **Rating Constraints** | One rating per buyer per listing (enforced by unique constraint) |
+| **Auto-Recalculation** | Seller's average rating and review count are auto-recalculated on each new rating |
+| **Profile Display** | Star rating and total reviews shown on the seller's profile stats row |
 
 ### 7.6 Landing Page
 
@@ -329,9 +343,9 @@ graph TD
 | Function | Signature | Description |
 |---|---|---|
 | `login` | `({ username, password }) → Promise` | Signs in via Supabase Auth; auto-generates email from username if needed (`username@casicas.local`) |
-| `register` | `({ username, email, password, role }) → Promise` | Creates Supabase Auth user, then updates `profiles` table with role |
+| `register` | `({ username, email, password, role, first_name, last_name }) → Promise` | Creates Supabase Auth user with metadata, then updates `profiles` table with role and name |
 | `logout` | `() → Promise` | Signs out, clears user and profile state |
-| `fetchProfile` | `(userId) → Promise<Profile>` | Fetches user profile from `profiles` table by ID |
+| `fetchProfile` | `(userId) → Promise<Profile>` | Fetches user profile (including avatar_url, rating, total_sales, total_purchases) from `profiles` table by ID |
 
 ### 8.2 Listing Functions (`api/client.js`)
 
@@ -355,7 +369,16 @@ graph TD
 | `reactToMessage` | `(messageId, emoji) → Promise<{action}>` | Toggles an emoji reaction on a message (add/remove) |
 | `markConversationRead` | `(conversationId) → Promise<void>` | Marks all unread messages in a conversation as read (for the current user) |
 
-### 8.4 Map Functions (`components/MapView.jsx`)
+### 8.4 Profile & Rating Functions (`api/client.js`)
+
+| Function | Signature | Description |
+|---|---|---|
+| `updateProfile` | `(profileData) → Promise<Profile>` | Updates the current user's profile fields (phone, bio, etc.) |
+| `uploadAvatar` | `(file) → Promise<Profile>` | Uploads a profile picture to the `avatars` storage bucket and updates `avatar_url` in the profile |
+| `rateSeller` | `(listingId, sellerId, score, review?) → Promise` | Submits a 1–5 star rating for a seller on a specific listing; auto-recalculates seller's average |
+| `getSellerRatings` | `(sellerId) → Promise<Rating[]>` | Fetches all ratings for a specific seller with reviewer info |
+
+### 8.5 Map Functions (`components/MapView.jsx`)
 
 | Function | Description |
 |---|---|
@@ -363,7 +386,7 @@ graph TD
 | `addMarkerLayers(map)` | Adds circle dots, text labels, hover popups, and click handlers to the map |
 | `updateRadiusCircle()` | Draws a 64-point polygon circle on the map representing the selected radius |
 
-### 8.5 Real-Time Functions (`components/ChatPanel.jsx`)
+### 8.6 Real-Time Functions (`components/ChatPanel.jsx`)
 
 | Function | Description |
 |---|---|
@@ -382,10 +405,27 @@ erDiagram
         uuid id PK
         text username
         text role
+        text first_name
+        text last_name
         text phone
         text bio
+        text avatar_url
+        integer total_sales
+        integer total_purchases
+        float rating
+        integer rating_count
         float latitude
         float longitude
+        timestamp created_at
+    }
+
+    RATINGS {
+        uuid id PK
+        uuid listing_id FK
+        uuid buyer_id FK
+        uuid seller_id FK
+        integer score
+        text review
         timestamp created_at
     }
 
@@ -441,6 +481,9 @@ erDiagram
     PROFILES ||--o{ MESSAGES : "sender_id"
     MESSAGES ||--o{ REACTIONS : "message_id"
     PROFILES ||--o{ REACTIONS : "user_id"
+    PROFILES ||--o{ RATINGS : "buyer_id"
+    PROFILES ||--o{ RATINGS : "seller_id"
+    LISTINGS ||--o{ RATINGS : "listing_id"
 ```
 
 ### Table Details
@@ -453,11 +496,33 @@ Stores user account information. Automatically created via Supabase Auth trigger
 | `id` | `uuid` | PK, FK → `auth.users` | User's unique identifier |
 | `username` | `text` | NOT NULL, UNIQUE | Display name |
 | `role` | `text` | DEFAULT `'buyer'` | `buyer` or `seller` |
+| `first_name` | `text` | DEFAULT `''` | First name |
+| `last_name` | `text` | DEFAULT `''` | Last name |
 | `phone` | `text` | NULLABLE | Contact number |
 | `bio` | `text` | NULLABLE | Short bio |
+| `avatar_url` | `text` | DEFAULT `''` | Profile picture URL from Supabase Storage |
+| `total_sales` | `integer` | DEFAULT `0` | Number of completed sales |
+| `total_purchases` | `integer` | DEFAULT `0` | Number of completed purchases |
+| `rating` | `float` | DEFAULT `0` | Average star rating (0–5) |
+| `rating_count` | `integer` | DEFAULT `0` | Total number of reviews received |
 | `latitude` | `float` | NULLABLE | User's default location |
 | `longitude` | `float` | NULLABLE | User's default location |
 | `created_at` | `timestamp` | DEFAULT `now()` | Account creation date |
+
+#### `ratings`
+Buyer-rates-seller reviews linked to specific listings.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | `uuid` | PK | Rating identifier |
+| `listing_id` | `uuid` | FK → `listings` | The listing this rating is for |
+| `buyer_id` | `uuid` | FK → `profiles` | Who submitted the rating |
+| `seller_id` | `uuid` | FK → `profiles` | Who is being rated |
+| `score` | `integer` | NOT NULL, 1–5 | Star rating value |
+| `review` | `text` | NULLABLE | Optional text review |
+| `created_at` | `timestamp` | DEFAULT `now()` | Rating submission date |
+
+> **Constraint:** `UNIQUE(listing_id, buyer_id)` — one rating per buyer per listing.
 
 #### `listings`
 Items posted for sale or wanted-to-buy.
@@ -541,9 +606,10 @@ Emoji reactions on messages.
 
 | Layer | Implementation | Details |
 |---|---|---|
-| **Bucket Policies** | Supabase Storage | Storage buckets (`listings`, `chat-images`) have access policies controlling who can upload and read files. |
+| **Bucket Policies** | Supabase Storage | Storage buckets (`listings`, `chat-images`, `avatars`) have access policies controlling who can upload and read files. |
 | **File Path Isolation** | User ID prefix | All uploaded files are stored under the user's ID prefix (e.g., `{user_id}/timestamp_filename.jpg`), preventing path traversal. |
 | **File Type Validation** | `accept="image/*"` | Frontend file inputs restrict uploads to image MIME types. |
+| **Avatar Bucket** | Public read, auth write | `avatars` bucket: public read, authenticated upload, users can only update/delete their own files (enforced by folder-name matching). |
 
 ### 10.4 Client-Side Security
 

@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 import { supabase } from '../lib/supabase';
+import { ArrowLeft, ImageIcon, Send } from './Icons';
 
-const REACTIONS = ['❤️', '👍', '😂', '😮', '😢'];
+const REACTIONS = ['\u2764\uFE0F', '\uD83D\uDC4D', '\uD83D\uDE02', '\uD83D\uDE2E', '\uD83D\uDE22'];
 
 export default function ChatPanel({ isOpen, onClose, listing, sellerId }) {
     const { user } = useAuth();
@@ -97,17 +98,19 @@ export default function ChatPanel({ isOpen, onClose, listing, sellerId }) {
                 schema: 'public',
                 table: 'messages',
                 filter: `conversation_id=eq.${convId}`,
-            }, (payload) => {
+            }, async (payload) => {
                 const newMsg = payload.new;
                 // Don't add if already in list
                 setMessages((prev) => {
                     if (prev.find((m) => m.id === newMsg.id)) return prev;
                     return [...prev, {
                         ...newMsg,
-                        sender_username: '',
+                        sender_username: newMsg.sender_id === user?.id ? user.username : '',
                         reaction_summary: [],
                     }];
                 });
+                // Reload to get proper sender username
+                setTimeout(() => loadMessages(convId), 500);
             })
             .subscribe();
 
@@ -120,10 +123,18 @@ export default function ChatPanel({ isOpen, onClose, listing, sellerId }) {
         try {
             if (imageFile) {
                 const msg = await api.sendMessageWithImage(activeConv.id, text.trim(), imageFile);
-                setMessages((prev) => [...prev, { ...msg, reaction_summary: [] }]);
+                setMessages((prev) => [...prev, {
+                    ...msg,
+                    sender_username: user?.username,
+                    reaction_summary: [],
+                }]);
             } else {
                 const msg = await api.sendMessage(activeConv.id, text.trim());
-                setMessages((prev) => [...prev, { ...msg, reaction_summary: [] }]);
+                setMessages((prev) => [...prev, {
+                    ...msg,
+                    sender_username: user?.username,
+                    reaction_summary: [],
+                }]);
             }
             setText('');
             setImageFile(null);
@@ -178,7 +189,7 @@ export default function ChatPanel({ isOpen, onClose, listing, sellerId }) {
                     {activeConv ? (
                         <>
                             <button className="chat-back-btn" onClick={() => { setActiveConv(null); setMessages([]); fetchConversations(); }}>
-                                ←
+                                <ArrowLeft size={18} />
                             </button>
                             <div className="chat-header-info">
                                 <strong>{otherUser}</strong>
@@ -190,7 +201,11 @@ export default function ChatPanel({ isOpen, onClose, listing, sellerId }) {
                     ) : (
                         <strong style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontSize: '0.85rem' }}>Messages</strong>
                     )}
-                    <button className="chat-close-btn" onClick={onClose}>×</button>
+                    <button className="chat-close-btn" onClick={onClose}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                    </button>
                 </div>
 
                 {/* Body */}
@@ -267,7 +282,12 @@ export default function ChatPanel({ isOpen, onClose, listing, sellerId }) {
                                                         className="chat-react-trigger"
                                                         onClick={() => setShowReactions(showReactions === msg.id ? null : msg.id)}
                                                     >
-                                                        😊
+                                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                            <circle cx="12" cy="12" r="10" />
+                                                            <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+                                                            <line x1="9" y1="9" x2="9.01" y2="9" />
+                                                            <line x1="15" y1="9" x2="15.01" y2="9" />
+                                                        </svg>
                                                     </button>
                                                 )}
 
@@ -313,7 +333,9 @@ export default function ChatPanel({ isOpen, onClose, listing, sellerId }) {
                                     className="chat-img-remove"
                                     onClick={() => { setImageFile(null); setImagePreview(null); }}
                                 >
-                                    ×
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                                    </svg>
                                 </button>
                             </div>
                         )}
@@ -324,9 +346,7 @@ export default function ChatPanel({ isOpen, onClose, listing, sellerId }) {
                                 onClick={() => fileInputRef.current?.click()}
                                 title="Attach photo"
                             >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
-                                </svg>
+                                <ImageIcon size={18} />
                             </button>
                             <input
                                 ref={fileInputRef}
@@ -349,7 +369,7 @@ export default function ChatPanel({ isOpen, onClose, listing, sellerId }) {
                                 onClick={handleSend}
                                 disabled={sending || (!text.trim() && !imageFile)}
                             >
-                                →
+                                <Send size={16} />
                             </button>
                         </div>
                     </>

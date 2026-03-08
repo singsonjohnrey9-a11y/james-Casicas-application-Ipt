@@ -289,6 +289,88 @@ export async function markConversationRead(conversationId) {
         .neq('sender_id', user.id);
 }
 
+// ──── Profile ────
+
+export async function updateProfile(profileData) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const updates = { ...profileData, updated_at: new Date().toISOString() };
+    const { data, error } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', user.id)
+        .select()
+        .single();
+    if (error) throw error;
+    return data;
+}
+
+export async function uploadAvatar(file) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const fileName = `${user.id}/${Date.now()}_avatar.${file.name.split('.').pop()}`;
+    const { data: uploadData, error: uploadErr } = await supabase.storage
+        .from('avatars')
+        .upload(fileName, file, { upsert: true });
+    if (uploadErr) throw uploadErr;
+
+    const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(uploadData.path);
+    const avatarUrl = urlData.publicUrl;
+
+    // Update profile with new avatar URL
+    await supabase.from('profiles').update({ avatar_url: avatarUrl }).eq('id', user.id);
+
+    return avatarUrl;
+}
+
+// ──── Ratings ────
+
+export async function rateSeller(listingId, sellerId, score, review = '') {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { data, error } = await supabase
+        .from('ratings')
+        .insert({
+            listing_id: listingId,
+            buyer_id: user.id,
+            seller_id: sellerId,
+            score,
+            review,
+        })
+        .select()
+        .single();
+    if (error) throw error;
+
+    // Update seller's average rating
+    const { data: ratings } = await supabase
+        .from('ratings')
+        .select('score')
+        .eq('seller_id', sellerId);
+
+    if (ratings && ratings.length > 0) {
+        const avg = ratings.reduce((sum, r) => sum + r.score, 0) / ratings.length;
+        await supabase.from('profiles').update({
+            rating: Math.round(avg * 10) / 10,
+            rating_count: ratings.length,
+        }).eq('id', sellerId);
+    }
+
+    return data;
+}
+
+export async function getSellerRatings(sellerId) {
+    const { data, error } = await supabase
+        .from('ratings')
+        .select('*, buyer:profiles!buyer_id(id, username, avatar_url)')
+        .eq('seller_id', sellerId)
+        .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data;
+}
+
 // ──── Default export for backward compat ────
 
 const api = {
@@ -304,6 +386,10 @@ const api = {
     sendMessageWithImage,
     reactToMessage,
     markConversationRead,
+    updateProfile,
+    uploadAvatar,
+    rateSeller,
+    getSellerRatings,
 };
 
 export default api;

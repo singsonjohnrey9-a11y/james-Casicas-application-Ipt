@@ -53,20 +53,29 @@ export function AuthProvider({ children }) {
         return { user: { ...data.user, ...prof } };
     };
 
-    const register = async ({ username, email, password, role }) => {
+    const register = async ({ username, email, password, role, first_name, last_name }) => {
         const userEmail = email || `${username}@casicas.local`;
         const { data, error } = await supabase.auth.signUp({
             email: userEmail,
             password,
-            options: { data: { username, role: role || 'buyer' } },
+            options: {
+                data: {
+                    username,
+                    role: role || 'buyer',
+                    first_name: first_name || '',
+                    last_name: last_name || '',
+                },
+            },
         });
         if (error) throw error;
 
-        // Update profile with role
+        // Update profile with role and name
         if (data.user) {
             await supabase.from('profiles').update({
                 username,
                 role: role || 'buyer',
+                first_name: first_name || '',
+                last_name: last_name || '',
             }).eq('id', data.user.id);
             await fetchProfile(data.user.id);
         }
@@ -85,14 +94,22 @@ export function AuthProvider({ children }) {
         username: profile.username,
         email: user.email,
         role: profile.role,
+        first_name: profile.first_name || '',
+        last_name: profile.last_name || '',
         phone: profile.phone,
         bio: profile.bio,
+        avatar_url: profile.avatar_url || '',
         latitude: profile.latitude,
         longitude: profile.longitude,
+        total_sales: profile.total_sales || 0,
+        total_purchases: profile.total_purchases || 0,
+        rating: profile.rating || 0,
+        rating_count: profile.rating_count || 0,
+        created_at: profile.created_at,
     } : null;
 
     return (
-        <AuthContext.Provider value={{ user: mergedUser, loading, login, register, logout }}>
+        <AuthContext.Provider value={{ user: mergedUser, loading, login, register, logout, fetchProfile }}>
             {children}
         </AuthContext.Provider>
     );
