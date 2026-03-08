@@ -51,6 +51,7 @@ export default function Navbar() {
                 {user ? (
                     <>
                         <li><Link to="/dashboard">Dashboard</Link></li>
+                        <li><Link to="/dashboard?tab=profile">Profile</Link></li>
                         <li>
                             <button onClick={logout} className="btn btn-outline btn-sm">
                                 Logout

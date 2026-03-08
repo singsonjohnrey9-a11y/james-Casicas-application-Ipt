@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { useRef, useEffect, useCallback, useState, forwardRef, useImperativeHandle } from 'react';
 import mapboxgl from 'mapbox-gl';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || '';
@@ -13,15 +13,29 @@ const MAP_STYLES = [
     { id: 'outdoors', label: '3D Terrain', style: 'mapbox://styles/mapbox/outdoors-v12' },
 ];
 
-export default function MapView({ listings = [], onMarkerClick, radiusKm, centerCoords }) {
+const MapView = forwardRef(function MapView({ listings = [], onMarkerClick, onViewDetails, radiusKm, centerCoords }, ref) {
     const mapContainer = useRef(null);
     const mapRef = useRef(null);
     const popupRef = useRef(null);
     const listingsRef = useRef(listings);
+    const onMarkerClickRef = useRef(onMarkerClick);
+    const onViewDetailsRef = useRef(onViewDetails);
     const [activeStyle, setActiveStyle] = useState('light');
     const [showStyles, setShowStyles] = useState(false);
 
     listingsRef.current = listings;
+    onMarkerClickRef.current = onMarkerClick;
+    onViewDetailsRef.current = onViewDetails;
+
+    // Expose flyTo method to parent
+    useImperativeHandle(ref, () => ({
+        flyTo: (lng, lat, zoom = 15) => {
+            const map = mapRef.current;
+            if (map) {
+                map.flyTo({ center: [lng, lat], zoom, duration: 1200 });
+            }
+        },
+    }), []);
 
     // Build GeoJSON from listings
     const buildGeoJSON = useCallback((data) => ({
@@ -87,27 +101,26 @@ export default function MapView({ listings = [], onMarkerClick, radiusKm, center
             },
         });
 
-        // Hover popup
+        // Popup (works for both hover on desktop and tap on mobile)
         const popup = new mapboxgl.Popup({
-            closeButton: false,
-            closeOnClick: false,
+            closeButton: true,
+            closeOnClick: true,
             maxWidth: '200px',
             className: 'map-hover-popup',
             offset: [0, -14],
         });
         popupRef.current = popup;
 
-        map.on('mouseenter', 'listing-dots', (e) => {
-            map.getCanvas().style.cursor = 'pointer';
-            const f = e.features[0];
+        // Helper to show popup for a feature
+        const showPopup = (f) => {
             const props = f.properties;
             const coords = f.geometry.coordinates.slice();
             const isSell = props.isSell === 1;
 
             const imgSrc = props.image_url;
             const imgHTML = imgSrc
-                ? `<img src="${imgSrc}" alt="" style="width:100%;height:110px;object-fit:cover;display:block;" />`
-                : `<div style="width:100%;height:60px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;color:#ccc;">
+                ? `<img src="${imgSrc}" alt="" style="width:100%;height:100px;object-fit:cover;display:block;border-radius:6px 6px 0 0;" />`
+                : `<div style="width:100%;height:50px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;color:#ccc;border-radius:6px 6px 0 0;">
                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
                    </div>`;
 
@@ -115,24 +128,50 @@ export default function MapView({ listings = [], onMarkerClick, radiusKm, center
                 ${imgHTML}
                 <div style="padding:8px;">
                   <div style="font-weight:700;font-size:12px;line-height:1.3;margin-bottom:3px;">${props.title}</div>
-                  <div style="font-weight:800;font-size:15px;margin-bottom:4px;">₱${props.price}</div>
-                  <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.1em;color:#999;">${props.category} · ${isSell ? 'Sale' : 'Buy'}</div>
-                  <div style="margin-top:6px;font-size:10px;font-weight:600;color:#0a0a0a;text-transform:uppercase;letter-spacing:0.06em;">View Details →</div>
+                  <div style="font-weight:800;font-size:15px;margin-bottom:4px;">\u20b1${props.price}</div>
+                  <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.1em;color:#999;">${props.category} \u00b7 ${isSell ? 'Sale' : 'Buy'}</div>
+                  <button class="popup-view-details-btn" data-listing-id="${props.id}">View Details \u2192</button>
                 </div>
             `).addTo(map);
+
+            // Bind click to the View Details button inside popup
+            setTimeout(() => {
+                const btn = document.querySelector('.popup-view-details-btn');
+                if (btn) {
+                    btn.addEventListener('click', () => {
+                        const listing = listingsRef.current.find((l) => String(l.id) === btn.dataset.listingId);
+                        if (listing && onViewDetailsRef.current) {
+                            onViewDetailsRef.current(listing);
+                            popup.remove();
+                        }
+                    });
+                }
+            }, 50);
+        };
+
+        // Desktop: hover to show popup
+        map.on('mouseenter', 'listing-dots', (e) => {
+            map.getCanvas().style.cursor = 'pointer';
+            showPopup(e.features[0]);
         });
 
         map.on('mouseleave', 'listing-dots', () => {
             map.getCanvas().style.cursor = '';
-            popup.remove();
+            // Don't remove popup if it was opened by click (mobile)
+            // Only remove if not actively interacting
+            if (!popup.getElement()?.matches(':hover')) {
+                popup.remove();
+            }
         });
 
+        // Click/tap: show popup (for mobile) + scroll to card
         map.on('click', 'listing-dots', (e) => {
-            const props = e.features[0].properties;
-            const listing = listingsRef.current.find((l) => l.id === props.id);
-            if (listing && onMarkerClick) onMarkerClick(listing);
+            const f = e.features[0];
+            showPopup(f);
+            const listing = listingsRef.current.find((l) => l.id === f.properties.id);
+            if (listing && onMarkerClickRef.current) onMarkerClickRef.current(listing);
         });
-    }, [buildGeoJSON, onMarkerClick]);
+    }, [buildGeoJSON]);
 
     // Initialize map
     useEffect(() => {
@@ -289,4 +328,6 @@ export default function MapView({ listings = [], onMarkerClick, radiusKm, center
             </div>
         </div>
     );
-}
+});
+
+export default MapView;

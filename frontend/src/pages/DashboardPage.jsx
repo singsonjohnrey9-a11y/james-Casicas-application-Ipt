@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../api/client';
 import ListingForm from '../components/ListingForm';
@@ -33,7 +33,8 @@ function StarRating({ rating = 0, count = 0 }) {
 export default function DashboardPage() {
     const { user, loading: authLoading, fetchProfile } = useAuth();
     const navigate = useNavigate();
-    const [tab, setTab] = useState('listings');
+    const [searchParams] = useSearchParams();
+    const [tab, setTab] = useState(() => searchParams.get('tab') || 'listings');
     const [listings, setListings] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);

@@ -29,3 +29,4 @@ dist/
 
 # Static collected
 staticfiles/
+.venv/

@@ -9,7 +9,8 @@ import { supabase } from '../lib/supabase';
 export async function getListings(filters = {}) {
     let query = supabase
         .from('listings')
-        .select('*, seller:profiles!seller_id(id, username)')
+        .select('*')
+        .eq('status', 'active')
         .order('created_at', { ascending: false });
 
     if (filters.category && filters.category !== 'all') {
@@ -18,9 +19,6 @@ export async function getListings(filters = {}) {
     if (filters.listing_type && filters.listing_type !== 'all') {
         query = query.eq('listing_type', filters.listing_type);
     }
-    if (filters.status) {
-        query = query.eq('status', filters.status);
-    }
     if (filters.seller_id) {
         query = query.eq('seller_id', filters.seller_id);
     }
@@ -28,10 +26,25 @@ export async function getListings(filters = {}) {
     const { data, error } = await query;
     if (error) throw error;
 
-    // Map to match old API shape
+    // Batch-fetch seller usernames
+    const sellerIds = [...new Set(data.map(l => l.seller_id).filter(Boolean))];
+    let sellerMap = {};
+    if (sellerIds.length > 0) {
+        const { data: sellers } = await supabase
+            .from('profiles')
+            .select('id, username, rating, rating_count, avatar_url')
+            .in('id', sellerIds);
+        if (sellers) {
+            sellers.forEach(s => { sellerMap[s.id] = s; });
+        }
+    }
+
     return data.map((l) => ({
         ...l,
-        seller_username: l.seller?.username || 'Unknown',
+        seller_username: sellerMap[l.seller_id]?.username || 'Unknown',
+        seller_rating: sellerMap[l.seller_id]?.rating || 0,
+        seller_rating_count: sellerMap[l.seller_id]?.rating_count || 0,
+        seller_avatar_url: sellerMap[l.seller_id]?.avatar_url || '',
         category_display: l.category.charAt(0).toUpperCase() + l.category.slice(1),
     }));
 }

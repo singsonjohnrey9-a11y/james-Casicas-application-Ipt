@@ -45,7 +45,7 @@ export function AuthProvider({ children }) {
     }, []);
 
     const login = async ({ username, password }) => {
-        // Supabase uses email — convention: username@casicas.local
+        // Always use the convention: username@casicas.local
         const email = username.includes('@') ? username : `${username}@casicas.local`;
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
@@ -54,9 +54,11 @@ export function AuthProvider({ children }) {
     };
 
     const register = async ({ username, email, password, role, first_name, last_name }) => {
-        const userEmail = email || `${username}@casicas.local`;
+        // Always use username@casicas.local for Supabase Auth
+        // Store the real email in the profile as contact info
+        const authEmail = `${username}@casicas.local`;
         const { data, error } = await supabase.auth.signUp({
-            email: userEmail,
+            email: authEmail,
             password,
             options: {
                 data: {
@@ -69,17 +71,26 @@ export function AuthProvider({ children }) {
         });
         if (error) throw error;
 
-        // Update profile with role and name
+        // Update profile with role, name, and save real email as contact
         if (data.user) {
             await supabase.from('profiles').update({
                 username,
                 role: role || 'buyer',
                 first_name: first_name || '',
                 last_name: last_name || '',
+                email: email || '',
             }).eq('id', data.user.id);
-            await fetchProfile(data.user.id);
         }
-        return { user: data.user };
+
+        // Auto-login after registration
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            email: authEmail,
+            password,
+        });
+        if (signInError) throw signInError;
+
+        const prof = await fetchProfile(signInData.user.id);
+        return { user: { ...signInData.user, ...prof } };
     };
 
     const logout = async () => {
